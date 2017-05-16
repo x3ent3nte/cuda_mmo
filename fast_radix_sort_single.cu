@@ -42,7 +42,7 @@ void invertFloats(unsigned int* vals, int num_elems)
 }
 
 __global__
-void markFlags(unsigned int* vals, uint4* flags, int dual_pos, int num_elems)
+void markFlags(unsigned int* vals, uint2* flags, int dual_pos, int num_elems)
 {
 	int lid = threadIdx.x;
 	int gid = lid + (blockDim.x * blockIdx.x);
@@ -52,19 +52,19 @@ void markFlags(unsigned int* vals, uint4* flags, int dual_pos, int num_elems)
 	}
 
 	unsigned int val = vals[gid];
-	unsigned int mask = 3 << (dual_pos * 2);
+	unsigned int mask = 1 << dual_pos;
 	val &= mask;
-	val >>= (dual_pos * 2);
+	val >>= dual_pos;
 
-	uint4 flag = {0,0,0,0};
+	uint2 flag = {0,0};
 	*((&flag.x) + val) = 1;
 	flags[gid] = flag;
 }
 
 __global__
-void scanExclusiveSumWithBlockTotals(uint4* in, uint4* out, uint4* block_totals, int num_elems)
+void scanExclusiveSumWithBlockTotals(uint2* in, uint2* out, uint2* block_totals, int num_elems)
 {
-	extern __shared__ uint4 sh_vals[];
+	extern __shared__ uint2 sh_vals[];
 
 	int lid = threadIdx.x;
 	int gid = lid + (blockDim.x * blockIdx.x);
@@ -79,7 +79,7 @@ void scanExclusiveSumWithBlockTotals(uint4* in, uint4* out, uint4* block_totals,
 	for(int offset = 1; offset < blockDim.x; offset <<= 1)
 	{
 		int left = lid - offset;
-		uint4 left_val;
+		uint2 left_val;
 		if(left >= 0)
 		{
 			left_val = sh_vals[left];
@@ -87,11 +87,9 @@ void scanExclusiveSumWithBlockTotals(uint4* in, uint4* out, uint4* block_totals,
 		__syncthreads();
 		if(left >= 0)
 		{	
-			uint4 val = sh_vals[lid];
+			uint2 val = sh_vals[lid];
 			val.x += left_val.x;
 			val.y += left_val.y;
-			val.z += left_val.z;
-			val.w += left_val.w;
 			sh_vals[lid] = val;
 		}
 		__syncthreads();
@@ -99,7 +97,7 @@ void scanExclusiveSumWithBlockTotals(uint4* in, uint4* out, uint4* block_totals,
 
 	if(lid == 0)
 	{
-		uint4 flag = {0,0,0,0};
+		uint2 flag = {0,0};
 		out[gid] = flag;
 	}
 	else
@@ -114,9 +112,9 @@ void scanExclusiveSumWithBlockTotals(uint4* in, uint4* out, uint4* block_totals,
 }
 
 __global__
-void scanInclusiveSum(uint4* in, uint4* out, int num_elems)
+void scanInclusiveSum(uint2* in, uint2* out, int num_elems)
 {
-	extern __shared__ uint4 sh_vals[];
+	extern __shared__ uint2 sh_vals[];
 
 	int lid = threadIdx.x;
 	int gid = lid + (blockDim.x * blockIdx.x);
@@ -131,7 +129,7 @@ void scanInclusiveSum(uint4* in, uint4* out, int num_elems)
 	for(int offset = 1; offset < blockDim.x; offset <<= 1)
 	{
 		int left = lid - offset;
-		uint4 left_val;
+		uint2 left_val;
 		if(left >= 0)
 		{
 			left_val = sh_vals[left];
@@ -139,11 +137,9 @@ void scanInclusiveSum(uint4* in, uint4* out, int num_elems)
 		__syncthreads();
 		if(left >= 0)
 		{	
-			uint4 val = sh_vals[lid];
+			uint2 val = sh_vals[lid];
 			val.x += left_val.x;
 			val.y += left_val.y;
-			val.z += left_val.z;
-			val.w += left_val.w;
 			sh_vals[lid] = val;
 		}
 		__syncthreads();
@@ -152,7 +148,7 @@ void scanInclusiveSum(uint4* in, uint4* out, int num_elems)
 }
 
 __global__
-void addBlockTotals(uint4* fours, uint4* block_totals, int num_elems)
+void addBlockTotals(uint2* fours, uint2* block_totals, int num_elems)
 {
 	int lid = threadIdx.x;
 	int gid = lid + (blockDim.x * blockIdx.x);
@@ -165,13 +161,11 @@ void addBlockTotals(uint4* fours, uint4* block_totals, int num_elems)
 		return;
 	}
 
-	uint4 val = fours[gid];
-	uint4 offsets = block_totals[blockIdx.x - 1];
+	uint2 val = fours[gid];
+	uint2 offsets = block_totals[blockIdx.x - 1];
 
 	val.x += offsets.x;
 	val.y += offsets.y;
-	val.z += offsets.z;
-	val.w += offsets.w;
 
 	fours[gid] = val;
 }
@@ -179,10 +173,10 @@ void addBlockTotals(uint4* fours, uint4* block_totals, int num_elems)
 __global__
 void scatterAddresses(unsigned int* vals_in, 
 					unsigned int* vals_out, 
-					uint4* flags, 
-					uint4* addresses, 
+					uint2* flags, 
+					uint2* addresses, 
 					int dual_pos,
-					uint4 offsets,
+					uint2 offsets,
 					int num_elems)
 {
 	int lid = threadIdx.x;
@@ -193,11 +187,11 @@ void scatterAddresses(unsigned int* vals_in,
 	}
 
 	unsigned int val = vals_in[gid];
-	unsigned int mask = 3 << (dual_pos * 2);
+	unsigned int mask = 1 << dual_pos;
 	unsigned int val_anded = val & mask;
-	val_anded >>= (dual_pos * 2);
+	val_anded >>= dual_pos;
 
-	uint4 addr_list = addresses[gid];
+	uint2 addr_list = addresses[gid];
 	unsigned int addr = *((&addr_list.x) + val_anded);
 	unsigned int offset = *((&offsets.x) + val_anded);
 	addr += offset;
@@ -211,30 +205,30 @@ void radixSort(float* h_vals, int num_elems)
 
 	unsigned int* d_vals;
 	unsigned int* d_vals_buffer;
-	uint4* d_flags;
-	uint4* d_addresses;
-	uint4* d_block_totals;
+	uint2* d_flags;
+	uint2* d_addresses;
+	uint2* d_block_totals;
 
 	cudaMalloc(&d_vals, sizeof(unsigned int) * num_elems);
 	cudaMalloc(&d_vals_buffer, sizeof(unsigned int) * num_elems);
-	cudaMalloc(&d_flags, sizeof(uint4) * num_elems);
-	cudaMalloc(&d_addresses, sizeof(uint4) * num_elems);
-	cudaMalloc(&d_block_totals, sizeof(uint4) * num_blocks);
+	cudaMalloc(&d_flags, sizeof(uint2) * num_elems);
+	cudaMalloc(&d_addresses, sizeof(uint2) * num_elems);
+	cudaMalloc(&d_block_totals, sizeof(uint2) * num_blocks);
 
 	cudaMemcpy(d_vals, h_vals, sizeof(unsigned int) * num_elems, cudaMemcpyHostToDevice);
 
 	convertFloats<<<num_blocks, num_threads>>>(d_vals, num_elems);
-	for(int bit_pair = 0; bit_pair < 16; bit_pair++)
+	for(int bit_pair = 0; bit_pair < 32; bit_pair++)
 	{
 		markFlags<<<num_blocks, num_threads>>>(d_vals, d_flags, bit_pair, num_elems);
 
-		scanExclusiveSumWithBlockTotals<<<num_blocks, num_threads, sizeof(uint4) * num_threads>>>(d_flags, d_addresses, d_block_totals, num_elems);
-		scanInclusiveSum<<<1, num_blocks, sizeof(uint4) * num_blocks>>>(d_block_totals, d_block_totals, num_blocks);
+		scanExclusiveSumWithBlockTotals<<<num_blocks, num_threads, sizeof(uint2) * num_threads>>>(d_flags, d_addresses, d_block_totals, num_elems);
+		scanInclusiveSum<<<1, num_blocks, sizeof(uint2) * num_blocks>>>(d_block_totals, d_block_totals, num_blocks);
 		addBlockTotals<<<num_blocks, num_threads>>>(d_addresses, d_block_totals, num_elems);
 		
-		uint4 totals = {0,0,0,0};
-		cudaMemcpy(&totals, &d_block_totals[num_blocks - 1], sizeof(uint4), cudaMemcpyDeviceToHost);
-		uint4 offsets = {0, totals.x, totals.x + totals.y, totals.x + totals.y + totals.z};
+		uint2 totals = {0,0,0,0};
+		cudaMemcpy(&totals, &d_block_totals[num_blocks - 1], sizeof(uint2), cudaMemcpyDeviceToHost);
+		uint2 offsets = {0, totals.x, totals.x + totals.y, totals.x + totals.y + totals.z};
 
 		scatterAddresses<<<num_blocks, num_threads>>>(d_vals, d_vals_buffer, d_flags, d_addresses, bit_pair, offsets, num_elems);
 
